@@ -57,7 +57,7 @@ flags.DEFINE_string("pre_trained_model_path",
 FLAGS = flags.FLAGS
     
 
-def run_epoch(session, iters_done, config, models, data_provider, 
+def run_epoch(session, iters_done, config, models, data_provider, summary_writer,
     verbose=False):
   """Runs the model on the given data."""
   start_time = time.time()
@@ -84,12 +84,15 @@ def run_epoch(session, iters_done, config, models, data_provider,
       
     # run forward and backward propgation
     m = models[ind_buc]
-    cost, _ = session.run([m.cost, m.train_op],
+    cost, summaries, _ = session.run([m.cost, m.summaries, m.train_op],
                           {m.input_data: x,
                            m.targets: y,
                            m.visual_features: vf,
                            m.valid_flags: fg,
                            m.seq_lens: sl})
+
+    summary_writer.add_summary(summaries, iters + iters_done)
+    summary_writer.flush()
                            
     costs += cost
     iters += 1
@@ -119,8 +122,10 @@ def main(unused_args):
   config = cu.load_config(config_path)
 
   # Start model training
-  with tf.Graph().as_default(), tf.Session(config=tf.ConfigProto(
-      intra_op_parallelism_threads=FLAGS.ses_threads)) as session:
+  tf_config = tf.ConfigProto(intra_op_parallelism_threads=FLAGS.ses_threads)
+  tf_config.gpu_options.allocator_type = 'BFC'
+  tf_config.gpu_options.allow_growth=True
+  with tf.Graph().as_default(), tf.Session(config=tf_config) as session:
     initializer = tf.random_uniform_initializer(-config.init_scale,
                                                 config.init_scale)
     assert len(config.buckets) >= 1
@@ -143,15 +148,21 @@ def main(unused_args):
             model_name=FLAGS.model_name,
             model_root=FLAGS.model_root)
         models.append(m)
+
+    summary_writer = tf.train.SummaryWriter(m.log_dir, session.graph)
         
     hdlr = logging.FileHandler(os.path.join(m.model_dir, 'log.txt'))
     hdlr.setLevel(logging.INFO)
     hdlr.setFormatter(logging.Formatter(formatter_log))
     logger.addHandler(hdlr)
     
-    if FLAGS.pre_trained_model_path:
-      models[0].saver.restore(session, FLAGS.pre_trained_model_path)
+    iters_done = 0 
+    if FLAGS.pre_trained_model_path and tf.train.latest_checkpoint(FLAGS.pre_trained_model_path) is not None:
       logger.info('Continue to train from %s', FLAGS.pre_trained_model_path)
+      filename = tf.train.latest_checkpoint(FLAGS.pre_trained_model_path)
+      models[0].saver.restore(session, filename)
+      iters_done = int(filename[filename.rfind('_')+1: filename.rfind('.ckpt')])
+      print('start from', iters_done)
     else:
       tf.initialize_all_variables().run()
 
@@ -160,12 +171,15 @@ def main(unused_args):
         FLAGS.vocab_path, config.vocab_size, FLAGS.vf_dir, config.vf_size)
     for i in range(config.num_epoch):
       train_cost, iters_done = run_epoch(session, iters_done, config, models, 
-          data_provider, verbose=True)
+          data_provider, summary_writer, verbose=True)
       logger.info("Train cost for epoch %d is %.3f" % (i, train_cost))
     
-    # Save final copy of the model
-    models[0].saver.save(session, os.path.join(m.variable_dir, 
-        'model_%d.ckpt' % iters_done))
+      # Save final copy of the model
+      models[0].saver.save(session, os.path.join(m.variable_dir, 
+          'model_%d.ckpt' % iters_done))
+      logger.info("Model saved with iteration %d", iters_done)
+      logger.info("at " + os.path.join(m.variable_dir, 
+          'model_%d.ckpt' %(iters_done)))
 
 
 if __name__ == "__main__":

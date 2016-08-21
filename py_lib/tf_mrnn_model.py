@@ -42,9 +42,11 @@ class mRNNModel(object):
     self.cu = CommonUtiler()
     self.model_dir = os.path.join(model_root, model_name)
     self.variable_dir = os.path.join(self.model_dir, 'variables')
+    self.log_dir = os.path.join(self.model_dir, 'log')
 
     self.cu.create_dir_if_not_exists(self.model_dir)
     self.cu.create_dir_if_not_exists(self.variable_dir)
+    self.cu.create_dir_if_not_exists(self.log_dir)
   
     self.batch_size = batch_size = config.batch_size
     self.num_steps = num_steps
@@ -189,6 +191,11 @@ class mRNNModel(object):
       optimizer = tf.train.GradientDescentOptimizer(self.lr)
     self._train_op = optimizer.apply_gradients(zip(grads, tvars))
 
+    summaries = []
+    summaries.append(tf.scalar_summary('training loss', self._cost))
+    summaries.append(tf.scalar_summary('learning rate', self._lr))
+    self._summaries = tf.merge_summary(summaries)
+
   def assign_lr(self, session, lr_value):
     session.run(tf.assign(self.lr, lr_value))
 
@@ -227,6 +234,10 @@ class mRNNModel(object):
   @property
   def lr(self):
     return self._lr
+
+  @property
+  def summaries(self):
+    return self._summaries
 
   @property
   def train_op(self):
