@@ -13,7 +13,7 @@ import tensorflow as tf
 from tensorflow.python.ops import math_ops
 
 sys.path.append('./py_lib/')
-from tf_data_provider import mRNNCocoBucketDataProvider
+from tf_data_provider_fast import mRNNCocoBucketDataProvider
 from common_utils import CommonUtiler
 from tf_mrnn_model import mRNNModel
 
@@ -166,10 +166,9 @@ def main(unused_args):
     else:
       tf.initialize_all_variables().run()
 
-    iters_done = 0
     data_provider = mRNNCocoBucketDataProvider(FLAGS.anno_files_path.split(':'),
         FLAGS.vocab_path, config.vocab_size, FLAGS.vf_dir, config.vf_size)
-    for i in range(config.num_epoch):
+    for i in range(iters_done, config.num_epoch + iters_done):
       train_cost, iters_done = run_epoch(session, iters_done, config, models, 
           data_provider, summary_writer, verbose=True)
       logger.info("Train cost for epoch %d is %.3f" % (i, train_cost))
